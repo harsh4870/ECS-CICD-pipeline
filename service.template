@@ -1,0 +1,343 @@
+{
+    "Description": "service.template - ECS Service template.",
+    "Parameters": {
+        "AppName": {
+            "Description": "Name of the application",
+            "Type": "String"
+        },
+        "ContainerImage": {
+            "Description": "The docker image to use in the Task Definition.",
+            "Type": "String"
+        },
+        "DbConnection": {
+            "Description": "Parameter for environment variable DB_CONNECTION.",
+            "Type": "String"
+        },
+        "DbDatabase": {
+            "Description": "Parameter for environment variable DB_DATABASE.",
+            "Type": "String"
+        },
+        "DbHost": {
+            "Description": "Parameter for environment variable DB_HOST.",
+            "Type": "String"
+        },
+        "DbPassword": {
+            "Description": "Parameter for environment variable DB_PASSWORD.",
+            "Type": "String"
+        },
+        "DbPort": {
+            "Description": "Parameter for environment variable DB_PORT.",
+            "Type": "String"
+        },
+        "DbUsername": {
+            "Description": "Parameter for environment variable DB_USERNAME.",
+            "Type": "String"
+        },
+        "DesiredCount": {
+            "Default": "1",
+            "Description": "Number of containers to keep active for service.",
+            "Type": "Number"
+        },
+        "ECSCluster": {
+            "Description": "The ECS Cluster to launch the service into.",
+            "Type": "String"
+        },
+        "Environment": {
+            "AllowedValues": [
+                "Development",
+                "Dev",
+                "Integration",
+                "PreProduction",
+                "Production",
+                "Staging",
+                "Test"
+            ],
+            "Default": "Development",
+            "Description": "Which app environment this stack is being created in",
+            "Type": "String"
+        },
+        "MaxCapacity": {
+            "Default": "4",
+            "Description": "The maximum number of running containers.",
+            "Type": "String"
+        },
+        "MinCapacity": {
+            "Default": "2",
+            "Description": "The minimum number of running containers.",
+            "Type": "String"
+        },
+        "TargetGroupArn": {
+            "Description": "The ALB Target Group ARN",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "ApplicationTask": {
+            "Properties": {
+                "ContainerDefinitions": [
+                    {
+                        "Cpu": 256,
+                        "Environment": [
+                            {
+                                "Name": "ENVIRONMENT",
+                                "Value": {
+                                    "Ref": "Environment"
+                                }
+                            },
+                            {
+                                "Name": "DB_CONNECTION",
+                                "Value": {
+                                    "Ref": "DbConnection"
+                                }
+                            },
+                            {
+                                "Name": "DB_HOST",
+                                "Value": {
+                                    "Ref": "DbHost"
+                                }
+                            },
+                            {
+                                "Name": "DB_PORT",
+                                "Value": {
+                                    "Ref": "DbPort"
+                                }
+                            },
+                            {
+                                "Name": "DB_DATABASE",
+                                "Value": {
+                                    "Ref": "DbDatabase"
+                                }
+                            },
+                            {
+                                "Name": "DB_USERNAME",
+                                "Value": {
+                                    "Ref": "DbUsername"
+                                }
+                            },
+                            {
+                                "Name": "DB_PASSWORD",
+                                "Value": {
+                                    "Ref": "DbPassword"
+                                }
+                            }
+                        ],
+                        "Essential": "true",
+                        "Image": {
+                            "Ref": "ContainerImage"
+                        },
+                        "Memory": 512,
+                        "MemoryReservation": 32,
+                        "Name": {
+                            "Fn::Join": [
+                                "-",
+                                [
+                                    {
+                                        "Ref": "Environment"
+                                    },
+                                    {
+                                        "Ref": "AppName"
+                                    }
+                                ]
+                            ]
+                        },
+                        "PortMappings": [
+                            {
+                                "ContainerPort": 80
+                            }
+                        ]
+                    }
+                ]
+            },
+            "Type": "AWS::ECS::TaskDefinition"
+        },
+        "AutoScaleRole": {
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": "sts:AssumeRole",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "application-autoscaling.amazonaws.com"
+                            }
+                        }
+                    ],
+                    "Version": "2012-10-17"
+                },
+                "Policies": [
+                    {
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "application-autoscaling:*",
+                                        "cloudwatch:DescribeAlarms",
+                                        "cloudwatch:PutMetricAlarm",
+                                        "ecs:DescribeServices",
+                                        "ecs:UpdateService"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": "*"
+                                }
+                            ]
+                        },
+                        "PolicyName": "AppAutoscalingPolicy"
+                    }
+                ]
+            },
+            "Type": "AWS::IAM::Role"
+        },
+        "ECSService": {
+            "Properties": {
+                "Cluster": {
+                    "Ref": "ECSCluster"
+                },
+                "DesiredCount": {
+                    "Ref": "DesiredCount"
+                },
+                "LoadBalancers": [
+                    {
+                        "ContainerName": {
+                            "Fn::Join": [
+                                "-",
+                                [
+                                    {
+                                        "Ref": "Environment"
+                                    },
+                                    {
+                                        "Ref": "AppName"
+                                    }
+                                ]
+                            ]
+                        },
+                        "ContainerPort": 80,
+                        "TargetGroupArn": {
+                            "Ref": "TargetGroupArn"
+                        }
+                    }
+                ],
+                "Role": {
+                    "Ref": "Servicerole"
+                },
+                "TaskDefinition": {
+                    "Ref": "ApplicationTask"
+                }
+            },
+            "Type": "AWS::ECS::Service"
+        },
+        "ECSServiceAlarmScaleUp": {
+            "Properties": {
+                "AlarmActions": [
+                    {
+                        "Ref": "ECSServiceScalingPolicy"
+                    }
+                ],
+                "AlarmDescription": "Alarm if CPU Utilization goes to high.",
+                "ComparisonOperator": "GreaterThanThreshold",
+                "Dimensions": [
+                    {
+                        "Name": "ECSService",
+                        "Value": {
+                            "Ref": "ECSService"
+                        }
+                    }
+                ],
+                "EvaluationPeriods": 1,
+                "MetricName": "CPUUtilization",
+                "Namespace": "AWS/ECS",
+                "Period": 60,
+                "Statistic": "Average",
+                "Threshold": "90"
+            },
+            "Type": "AWS::CloudWatch::Alarm"
+        },
+        "ECSServiceScalingPolicy": {
+            "Properties": {
+                "PolicyName": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            {
+                                "Ref": "AppName"
+                            },
+                            "ScalingPolicy"
+                        ]
+                    ]
+                },
+                "PolicyType": "StepScaling",
+                "ScalingTargetId": {
+                    "Ref": "ECSServiceScalingTarget"
+                },
+                "StepScalingPolicyConfiguration": {
+                    "AdjustmentType": "PercentChangeInCapacity",
+                    "Cooldown": 60,
+                    "MetricAggregationType": "Average",
+                    "StepAdjustments": [
+                        {
+                            "MetricIntervalLowerBound": 0,
+                            "ScalingAdjustment": 1
+                        }
+                    ]
+                }
+            },
+            "Type": "AWS::ApplicationAutoScaling::ScalingPolicy"
+        },
+        "ECSServiceScalingTarget": {
+            "Properties": {
+                "MaxCapacity": {
+                    "Ref": "MaxCapacity"
+                },
+                "MinCapacity": {
+                    "Ref": "MinCapacity"
+                },
+                "ResourceId": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "service/",
+                            {
+                                "Ref": "ECSCluster"
+                            },
+                            "/",
+                            {
+                                "Fn::GetAtt": [
+                                    "ECSService",
+                                    "Name"
+                                ]
+                            }
+                        ]
+                    ]
+                },
+                "RoleARN": {
+                    "Fn::GetAtt": [
+                        "AutoScaleRole",
+                        "Arn"
+                    ]
+                },
+                "ScalableDimension": "ecs:service:DesiredCount",
+                "ServiceNamespace": "ecs"
+            },
+            "Type": "AWS::ApplicationAutoScaling::ScalableTarget"
+        },
+        "Servicerole": {
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": "sts:AssumeRole",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "ecs.amazonaws.com"
+                            }
+                        }
+                    ],
+                    "Version": "2012-10-17"
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole"
+                ]
+            },
+            "Type": "AWS::IAM::Role"
+        }
+    }
+}

@@ -1,0 +1,24 @@
+version: 0.1
+phases:
+  pre_build:
+    commands:
+      - echo Setting timestamp for container tag
+      - echo `date +%s` > timestamp
+      - echo Logging into Amazon ECR...
+      - $(aws ecr get-login --region $AWS_DEFAULT_REGION)
+  build:
+    commands:
+      - echo Building and tagging container
+      - docker build -t $REPOSITORY_NAME .
+      - docker tag $REPOSITORY_NAME $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$REPOSITORY_NAME:$BRANCH-`cat ./timestamp`
+  post_build:
+    commands:
+      - echo Pushing docker image
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$REPOSITORY_NAME:$BRANCH-`cat ./timestamp`
+      - echo Preparing CloudFormation Artifacts
+      - aws s3 cp s3://$ECS_Bucket/$ECS_SERVICE_KEY task-definition.template
+      - aws s3 cp s3://$ECS_Bucket/$ECS_SERVICE_PARAMS_KEY cf-config.json
+artifacts:
+  files:
+    - task-definition.template
+    - cf-config.json
